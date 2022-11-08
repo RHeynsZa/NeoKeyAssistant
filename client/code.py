@@ -1,13 +1,10 @@
-# SPDX-FileCopyrightText: 2021 Kattni Rembor for Adafruit Industries
-#
-# SPDX-License-Identifier: MIT
-
-"""CircuitPython Capacitive Touch NeoPixel Brightness Control Example"""
-import time
+from time import sleep
 import board
 import touchio
 import neopixel
 from rainbowio import colorwheel
+import supervisor
+
 
 touch1 = touchio.TouchIn(board.TOUCH1)
 touch2 = touchio.TouchIn(board.TOUCH2)
@@ -15,90 +12,72 @@ num_pixels = 4
 pixels = neopixel.NeoPixel(board.NEOPIXEL, num_pixels, auto_write=False)
 
 
-RED = (255, 0, 0, 0)
-YELLOW = (255, 150, 0, 0)
-GREEN = (0, 255, 0, 0)
-CYAN = (0, 255, 255, 0)
-BLUE = (0, 0, 255, 0)
-PURPLE = (180, 0, 255, 0)
-ORANGE = (255, 44, 0, 0)
-TEAL = (0, 128, 128, 0)
-MAGENTA = (255, 0, 255, 0)
-WHITE = (255, 255, 255, 0)
+# this function takes a standard "hex code" for a color and returns
+# a tuple of (red, green, blue)
+def hex2rgb(hex_code):
+    red = int("0x" + hex_code[0:2], 16)
+    green = int("0x" + hex_code[2:4], 16)
+    blue = int("0x" + hex_code[4:6], 16)
+    rgb = (red, green, blue)
+    # print(rgb)
+    return rgb
 
 
-def color_chase(color, wait):
-    for i in range(num_pixels):
-        pixels[i] = color
-        time.sleep(wait)
-        pixels.show()
+black = (0, 0, 0)
+targetColor = black
+curColor = black
 
+mode = "solid"
 
-def rainbow_cycle(wait):
-    for j in range(255):
-        for i in range(num_pixels):
-            rc_index = (i * 254 // num_pixels) + j
-            pixels[i] = colorwheel(rc_index & 255)
-        pixels.show()
-        time.sleep(wait)
+# We start by turning off pixels
+pixels.fill(black)
+pixels.show()
 
+# Input is in the format
+# index,hexcode,mode,brightness
+# where index is the pixel index (0-3)
+# hexcode is the color in hex format (RRGGBB)
+# mode is either "solid" or "blink"
+# brightness is an float between 0 and 1
+# Example: 0,FF0000,blink
+# This will set pixel 0 to blink red
 
-def slice_alternating(wait):
-    pixels[::2] = [RED] * (num_pixels // 2)
-    pixels.show()
-    time.sleep(wait)
-    pixels[1::2] = [ORANGE] * (num_pixels // 2)
-    pixels.show()
-    time.sleep(wait)
-    pixels[::2] = [YELLOW] * (num_pixels // 2)
-    pixels.show()
-    time.sleep(wait)
-    pixels[1::2] = [GREEN] * (num_pixels // 2)
-    pixels.show()
-    time.sleep(wait)
-    pixels[::2] = [TEAL] * (num_pixels // 2)
-    pixels.show()
-    time.sleep(wait)
-    pixels[1::2] = [CYAN] * (num_pixels // 2)
-    pixels.show()
-    time.sleep(wait)
-    pixels[::2] = [BLUE] * (num_pixels // 2)
-    pixels.show()
-    time.sleep(wait)
-    pixels[1::2] = [PURPLE] * (num_pixels // 2)
-    pixels.show()
-    time.sleep(wait)
-    pixels[::2] = [MAGENTA] * (num_pixels // 2)
-    pixels.show()
-    time.sleep(wait)
-    pixels[1::2] = [WHITE] * (num_pixels // 2)
-    pixels.show()
-    time.sleep(wait)
-
-
-pixels.brightness = 0.05
-touched = time.monotonic()
-color = 0
-state = 2
-
+# This gets a bit complicated so we save a list of dicts for the states
+state = []
+for i in range(4):
+    state.append({"color": black, "mode": "solid", "blink": False})
+# Main Loop
 while True:
-    if state == 0:
-        rainbow_cycle(0.001)  # rainbow cycle with 1ms delay per step
-    elif state == 1:
-        color_chase(RED, 0.08)  # Increase the number to slow down the color chase
-        color_chase(YELLOW, 0.08)
-    elif state == 2:
-        slice_alternating(0.1)
+    if supervisor.runtime.serial_bytes_available:
+        inText = input().strip()
+        if inText == "":
+            continue
+        print("Received: " + inText)
 
-    if time.monotonic() - touched < 0.15:
+        # Split the input into the parts
+        parts = inText.split(",")
+        index = int(parts[0])
+        hexcode = parts[1]
+        mode = parts[2]
+
+        # Convert the hexcode to RGB
+        rgb = hex2rgb(hexcode)
+
+        # Set the state for the pixel
+        state[index]["color"] = rgb
+        state[index]["mode"] = mode
+        state[index]["blink"] = False
+    else:
+        # Now we update the pixels to the current state
+        for i in range(4):
+            if state[i]["mode"] == "solid":
+                pixels[i] = state[i]["color"]
+            elif state[i]["mode"] == "blink":
+                if state[i]["blink"]:
+                    pixels[i] = state[i]["color"]
+                else:
+                    pixels[i] = black
+                state[i]["blink"] = not state[i]["blink"]
+        pixels.show()
+        sleep(0.5)
         continue
-    if touch1.value:
-        # Touch pad 1 to increase the brightness.
-        pixels.brightness -= 0.05
-        pixels.show()
-        touched = time.monotonic()
-    elif touch2.value:
-        # Touch pad 2 to decrease the brightness.
-        pixels.brightness += 0.05
-        pixels.show()
-        touched = time.monotonic()
